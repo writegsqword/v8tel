@@ -50,8 +50,50 @@ def get_cagebase(args, from_tty):
     print(hex(resolve_cagebase()))
     
 
-def is_tagged_ptr(val):
+def is_tagged_ptr(val : int):
     return val & 1 == 1
+
+def untag_ptr(val : int):
+    return val & ~3
+
+def read_mem(addr : int, read_len : int, cage = False):
+    if cage:
+        addr += resolve_cagebase()        
+    return bytes(gdb.selected_inferior().read_memory(addr, read_len))
+
+def read_u32(addr : int, cage = False):
+    return u32(read_mem(addr, 4, cage))
+
+
+
+def _get_value_info_explore(val : int, explore_chain : list[int], depth : int):
+    explore_chain.append(val)
+    
+    if depth <= 0:
+        return explore_chain
+    if is_tagged_ptr(val):
+        #stop exploring if ref loops
+        if val in explore_chain[:-1]:
+            return explore_chain
+        return _get_value_info_explore(read_u32(untag_ptr(val), True), explore_chain, depth - 1)
+    return explore_chain
+
+    
+
+def get_value_info(val : int) -> str:
+    chain = _get_value_info_explore(val, [], 3)
+    res = ""
+    #print(chain)
+    for i in range(len(chain)):
+        v = chain[i]
+        #tagged ptr
+        if is_tagged_ptr(v):
+            res += f"{hex(v)} -> "
+            if i >= len(chain) - 1:
+                res += '...'
+        else:
+            res += f"{hex(v)} ({hex(v >> 1)})"
+    return res
 
 
 g_last_argstr = ""
@@ -79,35 +121,20 @@ def v8tel_main(args : str, from_tty : bool):
     if cagebase <= arg_start_addr <= cagebase + int(2**32):
         arg_start_addr -= cagebase
     if is_tagged_ptr(arg_start_addr):
-        arg_start_addr -= 1
+        arg_start_addr = untag_ptr(arg_start_addr)
     read_len = arg_var_count * 4
-    inferior = gdb.selected_inferior()
-    
-    dump = bytes(inferior.read_memory(cagebase + arg_start_addr, read_len))
+
+    dump = read_mem(cagebase + arg_start_addr, read_len)
     g_next_addr = arg_start_addr + read_len
     for off in range(0, len(dump), 4):
         addr = arg_start_addr + off
         val = u32(dump[off:off+4])
-        refchain = []
-        addr_explore = val
-        max_depth = 3
-        depth = 1
-        while is_tagged_ptr(addr_explore + cagebase) and depth < max_depth:
-            depth += 1
-            addr_explore = u32(bytes(inferior.read_memory(addr_explore + cagebase - 1, 4)))
-            refchain.append(addr_explore)
-        res_str = f"{hex(addr)}| {hex(val)}"
-        for v in refchain:
-            res_str += f"-> {hex(v)} "
+        res_str = f"{hex(addr)}| " + get_value_info(val)
+
             
         
         print(res_str)
-        
-        
-    
-    #print(args)
-    
-    
+
 
 
 cmd = GDBCommand("v8tel", v8tel_main, "hi")
