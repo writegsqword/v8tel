@@ -54,9 +54,11 @@ def is_tagged_ptr(val):
     return val & 1 == 1
 
 
-
+g_last_argstr = ""
+g_next_addr = 0
 def v8tel_main(args : str, from_tty : bool):
-
+    global g_last_argstr
+    global g_next_addr
     _argv = args.split(" ")
     arg_var_count = 10
     arg_start_addr = 0
@@ -67,9 +69,12 @@ def v8tel_main(args : str, from_tty : bool):
     if len(_argv[0]) > 0:
         arg_start_addr = int(_argv[0], base=0)
     if len(_argv) >= 2:
-        arg_start_addr = int(_argv[1], base=0)
+        arg_var_count = int(_argv[1], base=0)
         
-        
+    #not too fond of this solution but the other way(that i know of) is wayyy too messy
+    if args == g_last_argstr:
+        arg_start_addr = g_next_addr
+    g_last_argstr = args
     #fix start address based on heuristics
     if cagebase <= arg_start_addr <= cagebase + int(2**32):
         arg_start_addr -= cagebase
@@ -79,6 +84,7 @@ def v8tel_main(args : str, from_tty : bool):
     inferior = gdb.selected_inferior()
     
     dump = bytes(inferior.read_memory(cagebase + arg_start_addr, read_len))
+    g_next_addr = arg_start_addr + read_len
     for off in range(0, len(dump), 4):
         addr = arg_start_addr + off
         val = u32(dump[off:off+4])
